@@ -2,7 +2,8 @@
 
 ## 프로젝트 개요
 
-RISC-V RV32I instruction subset을 실행하는 CPU core를 Control Unit, Datapath, Memory 구조로 구현한 프로젝트입니다.
+RISC-V RV32I instruction subset을 실행하는 CPU core를 Control Unit, Datapath, Memory 구조로 구현한 프로젝트입니다.  
+**발표자료: https://drive.google.com/file/d/1lJpqC5rr4aY5bQ42WpIgWDJ5MNwCTp14/view?usp=drive_link**
 
 ## 목표 동작
 
