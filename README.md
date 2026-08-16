@@ -2,8 +2,8 @@
 
 ## 프로젝트 개요
 
-RISC-V RV32I integer instruction subset을 실행하는 CPU core를 Control Unit, Datapath, Instruction Memory, Data Memory 구조로 구현한 프로젝트입니다.
-PC 기반 instruction fetch부터 decode, execute, memory access, write-back, next PC update까지의 명령 실행 흐름을 SystemVerilog RTL로 구성했습니다.
+RISC-V RV32I integer instruction subset을 실행하는 **single-cycle CPU core**를 Control Unit, Datapath, Instruction Memory, Data Memory 구조로 구현한 프로젝트입니다.
+PC 기반 instruction fetch부터 decode, execute, memory access, write-back, next PC update까지의 명령 실행 흐름을 하나의 clock cycle 안에서 처리하도록 SystemVerilog RTL로 구성했습니다.
 [발표자료 PDF](https://drive.google.com/file/d/1lJpqC5rr4aY5bQ42WpIgWDJ5MNwCTp14/view?usp=drive_link)
 
 ## 목표 동작
@@ -27,6 +27,16 @@ PC 기반 instruction fetch부터 decode, execute, memory access, write-back, ne
 | 사용 장비 | Basys3 FPGA 대상 설계, simulation 환경 |
 | 사용 언어 | SystemVerilog |
 | 개발 도구 | Vivado, HDL simulation testbench |
+
+## 아키텍처 및 타이밍 분석
+
+- 구조: single-cycle datapath
+- 구현 조건: Basys3 `xc7a35tcpg236-1`, clock period `10.000 ns` (100 MHz)
+- Worst Negative Slack: `-6.571 ns`
+- Worst data path delay: `16.520 ns`
+- 결과: 100 MHz timing requirement 미충족
+
+모든 명령 실행 단계를 한 cycle의 조합 경로에서 처리하므로, worst path가 PC register에서 시작해 긴 조합 논리를 통과했습니다. 이 결과를 [FSM 기반 multi-cycle CPU가 포함된 APB Peripheral System](https://github.com/qpalzm0209/RV32I_APB_Peripheral_System)의 timing 결과와 비교해 명령 실행 단계 분할에 따른 critical path 차이를 확인했습니다.
 
 ## 시스템 구조
 
