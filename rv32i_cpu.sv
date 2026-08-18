@@ -12,237 +12,289 @@ module rv32i_cpu (
     output [2:0]  data_funct3,
     output [31:0] data_wdata
 );
-
-    logic        reg_we, alu_src2_sel, branch_valid;
-    logic        alu_src1_sel;
-    logic [1:0]  wb_src_sel, pc_next_sel;
+    logic        ir_we;
+    logic        operand_we;
+    logic        alu_out_we;
+    logic        mdr_we;
+    logic        reg_we;
+    logic        pc_we;
+    logic        pc_src_sel;
+    logic [1:0]  alu_src_a_sel;
+    logic [1:0]  alu_src_b_sel;
+    logic [1:0]  result_src_sel;
     logic [3:0]  alu_control;
-    logic [2:0]  branch_control;
+    logic [6:0]  opcode;
+    logic [2:0]  funct3;
+    logic [6:0]  funct7;
+    logic        branch_taken;
+
+    assign data_funct3 = funct3;
 
     control_unit U_CONTROL_UNIT (
-        .funct7(instr_data[31:25]),
-        .funct3(instr_data[14:12]),
-        .opcode(instr_data[6:0]),
+        .clk(clk),
+        .rst(rst),
+        .opcode(opcode),
+        .funct3(funct3),
+        .funct7(funct7),
+        .branch_taken(branch_taken),
+        .ir_we(ir_we),
+        .operand_we(operand_we),
+        .alu_out_we(alu_out_we),
+        .mdr_we(mdr_we),
         .reg_we(reg_we),
-        .alu_src1_sel(alu_src1_sel),
-        .alu_src2_sel(alu_src2_sel),
-        .alu_control(alu_control),
-        .wb_src_sel(wb_src_sel),
-        .data_funct3(data_funct3),
+        .pc_we(pc_we),
         .data_we(data_we),
-        .branch_control(branch_control),
-        .branch_valid(branch_valid),
-        .pc_next_sel(pc_next_sel)
+        .pc_src_sel(pc_src_sel),
+        .alu_src_a_sel(alu_src_a_sel),
+        .alu_src_b_sel(alu_src_b_sel),
+        .result_src_sel(result_src_sel),
+        .alu_control(alu_control)
     );
 
     rv32i_datapath U_DATAPATH (
         .clk(clk),
         .rst(rst),
+        .ir_we(ir_we),
+        .operand_we(operand_we),
+        .alu_out_we(alu_out_we),
+        .mdr_we(mdr_we),
         .reg_we(reg_we),
-        .alu_src1_sel(alu_src1_sel),
-        .alu_src2_sel(alu_src2_sel),
+        .pc_we(pc_we),
+        .pc_src_sel(pc_src_sel),
+        .alu_src_a_sel(alu_src_a_sel),
+        .alu_src_b_sel(alu_src_b_sel),
+        .result_src_sel(result_src_sel),
         .alu_control(alu_control),
         .instr_data(instr_data),
         .data_rdata(data_rdata),
-        .wb_src_sel(wb_src_sel),
-        .branch_valid(branch_valid),
-        .branch_control(branch_control),
-        .pc_next_sel(pc_next_sel),
         .instr_addr(instr_addr),
         .data_addr(data_addr),
-        .data_wdata(data_wdata)
+        .data_wdata(data_wdata),
+        .opcode(opcode),
+        .funct3(funct3),
+        .funct7(funct7),
+        .branch_taken(branch_taken)
     );
 endmodule
 
 module control_unit (
-    input        [6:0] funct7,
-    input        [2:0] funct3,
+    input              clk,
+    input              rst,
     input        [6:0] opcode,
+    input        [2:0] funct3,
+    input        [6:0] funct7,
+    input              branch_taken,
+    output logic       ir_we,
+    output logic       operand_we,
+    output logic       alu_out_we,
+    output logic       mdr_we,
     output logic       reg_we,
-    output logic       alu_src1_sel,
-    output logic       alu_src2_sel,
-    output logic [3:0] alu_control,
-    output logic [1:0] wb_src_sel,
-    output logic [2:0] data_funct3,
+    output logic       pc_we,
     output logic       data_we,
-    output logic [2:0] branch_control,
-    output logic       branch_valid,
-    output logic [1:0] pc_next_sel
+    output logic       pc_src_sel,
+    output logic [1:0] alu_src_a_sel,
+    output logic [1:0] alu_src_b_sel,
+    output logic [1:0] result_src_sel,
+    output logic [3:0] alu_control
 );
-    typedef enum logic [5:0] {
-        UNKNOWN = 6'd0,
-        ADD     = 6'd1,
-        SUB     = 6'd2,
-        SLL     = 6'd3,
-        SLT     = 6'd4,
-        SLTU    = 6'd5,
-        XOR     = 6'd6,
-        SRL     = 6'd7,
-        SRA     = 6'd8,
-        OR      = 6'd9,
-        AND     = 6'd10,
-        ADDI    = 6'd11,
-        SLTI    = 6'd12,
-        SLTIU   = 6'd13,
-        XORI    = 6'd14,
-        ORI     = 6'd15,
-        ANDI    = 6'd16,
-        SLLI    = 6'd17,
-        SRLI    = 6'd18,
-        SRAI    = 6'd19,
-        LB      = 6'd20,
-        LH      = 6'd21,
-        LW      = 6'd22,
-        LBU     = 6'd23,
-        LHU     = 6'd24,
-        SB      = 6'd25,
-        SH      = 6'd26,
-        SW      = 6'd27,
-        BEQ     = 6'd28,
-        BNE     = 6'd29,
-        BLT     = 6'd30,
-        BGE     = 6'd31,
-        BLTU    = 6'd32,
-        BGEU    = 6'd33,
-        LUI     = 6'd34,
-        AUIPC   = 6'd35,
-        JAL     = 6'd36,
-        JALR    = 6'd37
-    } instr_kind_e;
+    typedef enum logic [3:0] {
+        FETCH      = 4'd0,
+        DECODE     = 4'd1,
+        ALU_EXEC   = 4'd2,
+        ALU_WB     = 4'd3,
+        MEM_ADDR   = 4'd4,
+        MEM_READ   = 4'd5,
+        MEM_WB     = 4'd6,
+        MEM_WRITE  = 4'd7,
+        BRANCH     = 4'd8,
+        LUI_WB     = 4'd9,
+        JUMP       = 4'd10,
+        JALR_EXEC  = 4'd11
+    } state_e;
 
-    // Simulation-friendly decoded instruction kind for waveform inspection.
-    instr_kind_e decoded_instr_kind;
+    state_e state_q;
+    state_e state_d;
+    logic   instr_legal;
 
     always_comb begin
-        reg_we         = 1'b0;
-        alu_src1_sel   = `ALU_SRC1_RS1;
-        alu_src2_sel   = 1'b0;
-        alu_control    = `ADD;
-        wb_src_sel     = `WB_SRC_ALU;
-        data_funct3    = 3'b000;
-        data_we        = 1'b0;
-        branch_control = 3'b000;
-        branch_valid   = 1'b0;
-        pc_next_sel    = `PC_NEXT_PC4;
-        decoded_instr_kind = UNKNOWN;
-
+        instr_legal = 1'b0;
         unique case (opcode)
-            // R-type ALU: ADD/SUB/SLL/SLT/SLTU/XOR/SRL/SRA/OR/AND
             `R_TYPE: begin
-                reg_we       = 1'b1;
-                alu_src1_sel = `ALU_SRC1_RS1;
-                alu_src2_sel = 1'b0;
-                alu_control  = {funct7[5], funct3};
-                unique case ({funct7[5], funct3})
-                    `ADD:  decoded_instr_kind = ADD;
-                    `SUB:  decoded_instr_kind = SUB;
-                    `SLL:  decoded_instr_kind = SLL;
-                    `SLT:  decoded_instr_kind = SLT;
-                    `SLTU: decoded_instr_kind = SLTU;
-                    `XOR:  decoded_instr_kind = XOR;
-                    `SRL:  decoded_instr_kind = SRL;
-                    `SRA:  decoded_instr_kind = SRA;
-                    `OR:   decoded_instr_kind = OR;
-                    `AND:  decoded_instr_kind = AND;
-                    default: decoded_instr_kind = UNKNOWN;
-                endcase
-            end
-            // S-type store: SB/SH/SW
-            `S_TYPE: begin
-                alu_src1_sel = `ALU_SRC1_RS1;
-                alu_src2_sel = 1'b1;
-                alu_control  = `ADD;
-                data_funct3  = funct3;
-                data_we      = 1'b1;
                 unique case (funct3)
-                    3'b000: decoded_instr_kind = SB;
-                    3'b001: decoded_instr_kind = SH;
-                    3'b010: decoded_instr_kind = SW;
-                    default: decoded_instr_kind = UNKNOWN;
+                    3'b000, 3'b101:
+                        instr_legal = (funct7 == 7'b0000000) ||
+                                      (funct7 == 7'b0100000);
+                    3'b001, 3'b010, 3'b011, 3'b100, 3'b110, 3'b111:
+                        instr_legal = (funct7 == 7'b0000000);
+                    default:
+                        instr_legal = 1'b0;
                 endcase
             end
-            // I-type load: LB/LH/LW/LBU/LHU
-            `LOAD_TYPE: begin
-                reg_we       = 1'b1;
-                alu_src1_sel = `ALU_SRC1_RS1;
-                alu_src2_sel = 1'b1;
-                alu_control  = `ADD;
-                wb_src_sel   = `WB_SRC_MEM;
-                data_funct3  = funct3;
-                unique case (funct3)
-                    3'b000: decoded_instr_kind = LB;
-                    3'b001: decoded_instr_kind = LH;
-                    3'b010: decoded_instr_kind = LW;
-                    3'b100: decoded_instr_kind = LBU;
-                    3'b101: decoded_instr_kind = LHU;
-                    default: decoded_instr_kind = UNKNOWN;
-                endcase
-            end
-            // I-type ALU immediate: ADDI/SLTI/SLTIU/XORI/ORI/ANDI/SLLI/SRLI/SRAI
             `I_ALU_TYPE: begin
-                reg_we       = 1'b1;
-                alu_src1_sel = `ALU_SRC1_RS1;
-                alu_src2_sel = 1'b1;
-                if ((funct3 == 3'b001) || (funct3 == 3'b101))
+                unique case (funct3)
+                    3'b001:
+                        instr_legal = (funct7 == 7'b0000000);
+                    3'b101:
+                        instr_legal = (funct7 == 7'b0000000) ||
+                                      (funct7 == 7'b0100000);
+                    3'b000, 3'b010, 3'b011, 3'b100, 3'b110, 3'b111:
+                        instr_legal = 1'b1;
+                    default:
+                        instr_legal = 1'b0;
+                endcase
+            end
+            `LOAD_TYPE:
+                instr_legal = (funct3 == 3'b000) || (funct3 == 3'b001) ||
+                              (funct3 == 3'b010) || (funct3 == 3'b100) ||
+                              (funct3 == 3'b101);
+            `S_TYPE:
+                instr_legal = (funct3 == 3'b000) || (funct3 == 3'b001) ||
+                              (funct3 == 3'b010);
+            `B_TYPE:
+                instr_legal = (funct3 == `BEQ)  || (funct3 == `BNE) ||
+                              (funct3 == `BLT)  || (funct3 == `BGE) ||
+                              (funct3 == `BLTU) || (funct3 == `BGEU);
+            `JALR_TYPE:
+                instr_legal = (funct3 == 3'b000);
+            `LUI_TYPE, `AUIPC_TYPE, `JAL_TYPE:
+                instr_legal = 1'b1;
+            default:
+                instr_legal = 1'b0;
+        endcase
+    end
+
+    always_ff @(posedge clk, posedge rst) begin
+        if (rst)
+            state_q <= FETCH;
+        else
+            state_q <= state_d;
+    end
+
+    always_comb begin
+        state_d = FETCH;
+        unique case (state_q)
+            FETCH:  state_d = DECODE;
+            DECODE: begin
+                if (instr_legal) begin
+                    unique case (opcode)
+                        `R_TYPE, `I_ALU_TYPE, `AUIPC_TYPE: state_d = ALU_EXEC;
+                        `LOAD_TYPE, `S_TYPE:               state_d = MEM_ADDR;
+                        `B_TYPE:                           state_d = BRANCH;
+                        `LUI_TYPE:                         state_d = LUI_WB;
+                        `JAL_TYPE:                         state_d = JUMP;
+                        `JALR_TYPE:                        state_d = JALR_EXEC;
+                        default:                           state_d = FETCH;
+                    endcase
+                end
+            end
+            ALU_EXEC:  state_d = ALU_WB;
+            MEM_ADDR:  state_d = (opcode == `LOAD_TYPE) ? MEM_READ : MEM_WRITE;
+            MEM_READ:  state_d = MEM_WB;
+            default:   state_d = FETCH;
+        endcase
+    end
+
+    always_comb begin
+        ir_we          = 1'b0;
+        operand_we     = 1'b0;
+        alu_out_we     = 1'b0;
+        mdr_we         = 1'b0;
+        reg_we         = 1'b0;
+        pc_we          = 1'b0;
+        data_we        = 1'b0;
+        pc_src_sel     = `PC_SRC_ALU;
+        alu_src_a_sel  = `ALU_A_PC;
+        alu_src_b_sel  = `ALU_B_REG_B;
+        result_src_sel = `RESULT_ALU_OUT;
+        alu_control    = `ADD;
+
+        unique case (state_q)
+            FETCH: begin
+                ir_we         = 1'b1;
+                pc_we         = 1'b1;
+                alu_src_a_sel = `ALU_A_PC;
+                alu_src_b_sel = `ALU_B_FOUR;
+                alu_control   = `ADD;
+            end
+
+            DECODE: begin
+                operand_we = instr_legal;
+            end
+
+            ALU_EXEC: begin
+                alu_out_we = 1'b1;
+                alu_src_a_sel = (opcode == `AUIPC_TYPE) ?
+                                `ALU_A_OLD_PC : `ALU_A_REG_A;
+                alu_src_b_sel = (opcode == `R_TYPE) ?
+                                `ALU_B_REG_B : `ALU_B_IMM;
+
+                if (opcode == `R_TYPE)
                     alu_control = {funct7[5], funct3};
-                else
-                    alu_control = {1'b0, funct3};
-                unique case (funct3)
-                    3'b000: decoded_instr_kind = ADDI;
-                    3'b010: decoded_instr_kind = SLTI;
-                    3'b011: decoded_instr_kind = SLTIU;
-                    3'b100: decoded_instr_kind = XORI;
-                    3'b110: decoded_instr_kind = ORI;
-                    3'b111: decoded_instr_kind = ANDI;
-                    3'b001: decoded_instr_kind = SLLI;
-                    3'b101: decoded_instr_kind = funct7[5] ? SRAI : SRLI;
-                    default: decoded_instr_kind = UNKNOWN;
-                endcase
+                else if (opcode == `I_ALU_TYPE) begin
+                    if ((funct3 == 3'b001) || (funct3 == 3'b101))
+                        alu_control = {funct7[5], funct3};
+                    else
+                        alu_control = {1'b0, funct3};
+                end else
+                    alu_control = `ADD;
             end
-            // B-type branch: BEQ/BNE/BLT/BGE/BLTU/BGEU
-            `B_TYPE: begin
-                branch_valid   = 1'b1;
-                branch_control = funct3;
-                pc_next_sel    = `PC_NEXT_BRANCH;
-                unique case (funct3)
-                    `BEQ:  decoded_instr_kind = BEQ;
-                    `BNE:  decoded_instr_kind = BNE;
-                    `BLT:  decoded_instr_kind = BLT;
-                    `BGE:  decoded_instr_kind = BGE;
-                    `BLTU: decoded_instr_kind = BLTU;
-                    `BGEU: decoded_instr_kind = BGEU;
-                    default: decoded_instr_kind = UNKNOWN;
-                endcase
+
+            ALU_WB: begin
+                reg_we         = 1'b1;
+                result_src_sel = `RESULT_ALU_OUT;
             end
-            // U-type upper immediate: LUI
-            `LUI_TYPE: begin
-                reg_we       = 1'b1;
-                wb_src_sel   = `WB_SRC_IMM;
-                decoded_instr_kind = LUI;
+
+            MEM_ADDR: begin
+                alu_out_we    = 1'b1;
+                alu_src_a_sel = `ALU_A_REG_A;
+                alu_src_b_sel = `ALU_B_IMM;
+                alu_control   = `ADD;
             end
-            // U-type upper immediate plus PC: AUIPC
-            `AUIPC_TYPE: begin
-                reg_we       = 1'b1;
-                alu_src1_sel = `ALU_SRC1_PC;
-                alu_src2_sel = 1'b1;
-                alu_control  = `ADD;
-                wb_src_sel   = `WB_SRC_ALU;
-                decoded_instr_kind = AUIPC;
+
+            MEM_READ: begin
+                mdr_we = 1'b1;
             end
-            // J-type jump and link: JAL
-            `JAL_TYPE: begin
-                reg_we      = 1'b1;
-                wb_src_sel  = `WB_SRC_PC4;
-                pc_next_sel = `PC_NEXT_JUMP;
-                decoded_instr_kind = JAL;
+
+            MEM_WB: begin
+                reg_we         = 1'b1;
+                result_src_sel = `RESULT_MDR;
             end
-            // I-type jump and link register: JALR
-            `JALR_TYPE: begin
-                reg_we      = 1'b1;
-                wb_src_sel  = `WB_SRC_PC4;
-                pc_next_sel = `PC_NEXT_RS1_IMM;
-                decoded_instr_kind = JALR;
+
+            MEM_WRITE: begin
+                data_we = 1'b1;
             end
+
+            BRANCH: begin
+                alu_src_a_sel = `ALU_A_OLD_PC;
+                alu_src_b_sel = `ALU_B_IMM;
+                alu_control   = `ADD;
+                pc_we         = branch_taken;
+            end
+
+            LUI_WB: begin
+                reg_we         = 1'b1;
+                result_src_sel = `RESULT_IMM;
+            end
+
+            JUMP: begin
+                reg_we         = 1'b1;
+                result_src_sel = `RESULT_PC;
+                alu_src_a_sel  = `ALU_A_OLD_PC;
+                alu_src_b_sel  = `ALU_B_IMM;
+                alu_control    = `ADD;
+                pc_we          = 1'b1;
+            end
+
+            JALR_EXEC: begin
+                reg_we         = 1'b1;
+                result_src_sel = `RESULT_PC;
+                alu_src_a_sel  = `ALU_A_REG_A;
+                alu_src_b_sel  = `ALU_B_IMM;
+                alu_control    = `ADD;
+                pc_src_sel     = `PC_SRC_JALR;
+                pc_we          = 1'b1;
+            end
+
             default: begin
             end
         endcase

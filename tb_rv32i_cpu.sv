@@ -17,7 +17,8 @@ module tb_rv32i_cpu ();
         @(negedge clk);
         rst = 0;
 
-        repeat (20) @(negedge clk);
+        // The multi-cycle core needs up to five clocks per instruction.
+        repeat (40) @(negedge clk);
         $stop;
     end
 endmodule
