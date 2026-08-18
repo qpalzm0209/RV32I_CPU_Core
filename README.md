@@ -1,72 +1,109 @@
-﻿# RV32I CPU Core
+# RV32I CPU Core V2 — Multi-cycle
 
-## 프로젝트 개요
+기존 [RV32I_CPU_Core](https://github.com/qpalzm0209/RV32I_CPU_Core)의 single-cycle 데이터패스를 FSM 기반 multi-cycle 구조로 전환한 V2입니다. 기존에 지원하던 RV32I 명령 집합과 `rv32i_cpu` 외부 메모리 인터페이스는 유지하면서, 긴 조합 경로를 여러 클록으로 분할했습니다.
 
-RISC-V RV32I integer instruction subset을 실행하는 **single-cycle CPU core**를 Control Unit, Datapath, Instruction Memory, Data Memory 구조로 구현한 프로젝트입니다.
-PC 기반 instruction fetch부터 decode, execute, memory access, write-back, next PC update까지의 명령 실행 흐름을 하나의 clock cycle 안에서 처리하도록 SystemVerilog RTL로 구성했습니다.
-[발표자료 PDF](https://drive.google.com/file/d/1lJpqC5rr4aY5bQ42WpIgWDJ5MNwCTp14/view?usp=drive_link)
+## V2에서 달라진 점
 
-## 목표 동작
+| 구분 | V1 single-cycle | V2 multi-cycle |
+| --- | --- | --- |
+| 제어기 | opcode 기반 조합 디코더 | 12-state FSM + state-qualified control |
+| 명령어 실행 | 모든 단계를 1 cycle에 처리 | 3~5 cycle로 단계 분할 |
+| 내부 상태 | PC, register file | PC + IR + OldPC + A/B + ALUOut + MDR |
+| PC 갱신 | 매 cycle 갱신 | FETCH 및 branch/jump 상태에서만 갱신 |
+| 메모리 쓰기 | 명령 디코드와 동시에 활성화 | MEM_WRITE 상태에서만 1 cycle pulse |
+| 목적 | CPI 1의 단순 구조 | critical path 단축과 단계별 제어 명확화 |
 
-- Instruction memory에서 명령어를 fetch합니다.
-- Control Unit이 opcode/funct 필드를 해석해 제어 신호를 생성합니다.
-- Datapath가 register file, ALU, branch compare, immediate extender를 통해 명령어를 실행합니다.
-- R-type `ADD/SUB/SLL/SLT/SLTU/XOR/SRL/SRA/OR/AND`와 I-type ALU immediate 명령을 실행합니다.
-- `LB/LH/LW/LBU/LHU`, `SB/SH/SW`를 통해 byte-addressed little-endian data memory를 load/store합니다.
-- `BEQ/BNE/BLT/BGE/BLTU/BGEU`, `LUI/AUIPC`, `JAL/JALR`의 PC update 흐름을 수행합니다.
-- 32 x 32-bit register file에서 `x0`을 항상 `0x00000000`으로 유지하고, reset 시 register file과 data memory를 초기화합니다.
-- Data memory는 128개의 byte로 구성되며, load 명령은 폭에 따라 sign/zero extension을 적용합니다.
-
-실행할 프로그램은 simulation working directory의 `riscv_prg.mem` 파일에서 `$readmemh`로 instruction memory에 로드합니다.
-
-## 기술 스택
-
-| 구분 | 내용 |
-| --- | --- |
-| 핵심 개념 | RISC-V RV32I subset, CPU datapath, control unit, ALU, register file, branch/jump, load/store |
-| 사용 장비 | Basys3 FPGA 대상 설계, simulation 환경 |
-| 사용 언어 | SystemVerilog |
-| 개발 도구 | Vivado, HDL simulation testbench |
-
-## 아키텍처 및 타이밍 분석
-
-- 구조: single-cycle datapath
-- 구현 조건: Basys3 `xc7a35tcpg236-1`, clock period `10.000 ns` (100 MHz)
-- Worst Negative Slack: `-6.571 ns`
-- Worst data path delay: `16.520 ns`
-- 결과: 100 MHz timing requirement 미충족
-
-모든 명령 실행 단계를 한 cycle의 조합 경로에서 처리하므로, worst path가 PC register에서 시작해 긴 조합 논리를 통과했습니다. 이 결과를 [FSM 기반 multi-cycle CPU가 포함된 APB Peripheral System](https://github.com/qpalzm0209/RV32I_APB_Peripheral_System)의 timing 결과와 비교해 명령 실행 단계 분할에 따른 critical path 차이를 확인했습니다.
-
-## 시스템 구조
+## 상태 흐름
 
 ```text
-rv32i_top
-├─ instruction_mem
-├─ data_mem
-└─ rv32i_cpu
-   ├─ control_unit
-   └─ rv32i_datapath
-      ├─ program_counter
-      ├─ pc_adder
-      ├─ register_file
-      ├─ imm_extender
-      ├─ alu
-      ├─ branch_compare
-      ├─ state_register
-      ├─ mux_2x1
-      └─ mux_4x1
+FETCH -> DECODE -> ALU_EXEC -> ALU_WB -> FETCH       R/I ALU, AUIPC
+                -> MEM_ADDR -> MEM_READ -> MEM_WB    Load
+                            -> MEM_WRITE              Store
+                -> BRANCH                            Branch
+                -> LUI_WB                            LUI
+                -> JUMP                              JAL
+                -> JALR_EXEC                         JALR
 ```
 
-- `rv32i_top`: CPU core와 instruction/data memory를 연결하는 최상위 모듈입니다.
-- `rv32i_cpu`: Control Unit과 Datapath를 묶어 instruction 실행 흐름을 구성합니다.
-- `control_unit`: opcode 기반으로 ALU operation, memory write, register write, PC source 등을 생성합니다.
-- `rv32i_datapath`: PC, register file, ALU, immediate, branch 비교 로직을 포함합니다.
-- `instruction_mem`: 실행할 instruction을 제공합니다.
-- `data_mem`: load/store 명령의 데이터 저장소 역할을 합니다.
+FETCH에서 현재 명령어와 명령어 주소를 `IR`, `OldPC`에 저장하고 PC를 `PC+4`로 갱신합니다. 이후 단계는 IR에 저장된 명령을 사용하므로 instruction memory 출력이 다음 주소로 바뀌어도 실행 중인 명령은 유지됩니다.
 
-## 검증 방식
+### 명령어별 cycle 수
 
-- `tb_rv32i_cpu`, `rv32i_top_sim`에서 clock/reset을 인가하고 instruction 실행에 따른 PC, register file, ALU, data memory 변화를 파형으로 확인합니다.
-- `instruction_mem.sv`의 예제 instruction image는 ALU, load/store 폭과 sign extension, signed/unsigned branch, LUI/AUIPC/JAL/JALR 조건을 포함하도록 구성할 수 있습니다.
-- `riscv_prg.mem`에 원하는 RV32I instruction image를 준비하면 동일한 RTL에서 프로그램별 동작을 재현할 수 있습니다.
+| 명령어 종류 | 상태 | Cycle |
+| --- | --- | ---: |
+| R-type / I-type ALU | FETCH → DECODE → ALU_EXEC → ALU_WB | 4 |
+| AUIPC | FETCH → DECODE → ALU_EXEC → ALU_WB | 4 |
+| Load | FETCH → DECODE → MEM_ADDR → MEM_READ → MEM_WB | 5 |
+| Store | FETCH → DECODE → MEM_ADDR → MEM_WRITE | 4 |
+| Branch | FETCH → DECODE → BRANCH | 3 |
+| LUI | FETCH → DECODE → LUI_WB | 3 |
+| JAL / JALR | FETCH → DECODE → JUMP/JALR_EXEC | 3 |
+
+## 지원 명령어
+
+- R-type: `ADD SUB SLL SLT SLTU XOR SRL SRA OR AND`
+- I-type ALU: `ADDI SLTI SLTIU XORI ORI ANDI SLLI SRLI SRAI`
+- Load: `LB LH LW LBU LHU`
+- Store: `SB SH SW`
+- Branch: `BEQ BNE BLT BGE BLTU BGEU`
+- Upper/jump: `LUI AUIPC JAL JALR`
+
+## 타이밍 검증
+
+V1 README의 Basys3 100 MHz 결과는 WNS `-6.571 ns`, worst data path `16.520 ns`로 timing violation이었습니다.
+
+V2는 Vivado 2020.2, `xc7a35tcpg236-1`, 10.000 ns clock에서 `rv32i_cpu`를 out-of-context로 합성·배치·배선했습니다.
+
+| 항목 | V2 측정값 |
+| --- | ---: |
+| WNS | `+0.749 ns` |
+| Worst data path delay | `9.100 ns` |
+| Slice LUTs | 1,332 (6.40%) |
+| Slice Registers | 1,230 (2.96%) |
+| BRAM / DSP | 0 / 0 |
+
+100 MHz 내부 register-to-register 제약은 충족했습니다. 다만 V1 수치와 V2 수치는 프로젝트 및 합성 경계가 완전히 같은 A/B 실험이 아니므로, 숫자 차이를 순수 아키텍처 개선량으로 단정하지 않습니다. V2 결과 역시 OOC 포트 위치와 상위 시스템 I/O delay가 없는 코어 내부 경로 결과이며, 최종 보드 timing sign-off는 실제 top/핀/메모리 조건을 포함해 다시 수행해야 합니다.
+
+## 검증
+
+네 개의 self-checking test를 사용합니다.
+
+- `tb_multicycle_timing`: ALU 명령의 DECODE/EXECUTE/WRITEBACK 동안 PC 유지
+- `tb_rv32i_isa`: 지원 명령 37개의 register/data-memory signature
+- `tb_control_flow_edges`: not-taken/역방향 branch, JAL link, 홀수 JALR target 정렬
+- `tb_illegal_instruction`: 잘못된 funct 조합의 register/PC/memory side effect 차단
+
+인식하지 않는 인코딩은 trap 없이 다음 명령으로 넘기며 architectural state를 변경하지 않습니다.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/run_tests.ps1
+powershell -ExecutionPolicy Bypass -File scripts/run_synth_check.ps1
+```
+
+도구 경로는 기본적으로 `C:\Xilinx\Vivado\2020.2\bin`을 사용합니다. 다른 버전이나 설치 위치에서는 두 PowerShell 스크립트의 `$vivadoBin` 또는 `$vivado` 값을 변경하면 됩니다.
+
+## 프로젝트 구조
+
+```text
+RV32I_CPU_Core_v2
+├─ define.vh                    opcode/control definitions
+├─ rv32i_cpu.sv                 top-level CPU + multi-cycle FSM
+├─ rv32i_datapath.sv            staged datapath and architectural state
+├─ instruction_mem.sv           asynchronous instruction ROM
+├─ data_mem.sv                  byte-addressed load/store memory
+├─ rv32i_top.sv                 CPU and memory integration
+├─ riscv_prg.mem                small default demonstration program
+├─ tests/
+│  ├─ tb_multicycle_timing.sv
+│  ├─ tb_rv32i_isa.sv
+│  ├─ tb_control_flow_edges.sv
+│  └─ tb_illegal_instruction.sv
+├─ scripts/
+│  ├─ run_tests.ps1
+│  ├─ check_synth.tcl
+│  └─ run_synth_check.ps1
+```
+
+## 성능 해석 시 주의점
+
+Multi-cycle은 최대 클록 주파수와 단계별 제어를 개선하지만 CPI는 증가합니다. 100 MHz에서 이 구현의 이상적인 처리율은 ALU 약 25 MIPS, load 약 20 MIPS, branch/jump 약 33.3 MIPS입니다. 따라서 V2의 핵심 성과는 “항상 처리량이 더 높다”가 아니라, 100 MHz timing closure, 짧아진 단계별 critical path, 하드웨어 재사용, 그리고 이후 wait-state/exception 등을 추가하기 쉬운 제어 구조입니다.

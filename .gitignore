@@ -1,0 +1,9 @@
+.sim/
+.synth/
+*.jou
+*.log
+*.str
+*.wdb
+*.pb
+xsim.dir/
+.Xil/
